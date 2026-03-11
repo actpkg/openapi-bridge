@@ -8,7 +8,8 @@ use spec::BridgeConfig;
 
 wit_bindgen::generate!({
     path: "wit",
-    world: "act-world",
+    world: "component-world",
+    generate_all,
 });
 
 struct OpenApiBridge;
@@ -20,7 +21,7 @@ const DEFAULT_LANG: &str = "en";
 fn make_error(kind: &str, msg: String) -> act::core::types::ToolError {
     act::core::types::ToolError {
         kind: kind.to_string(),
-        message: vec![(DEFAULT_LANG.to_string(), msg)],
+        message: act::core::types::LocalizedString::Plain(msg),
         metadata: vec![],
     }
 }
@@ -172,7 +173,7 @@ fn to_wit_tool(tool: &tools::ResolvedTool) -> act::core::types::ToolDefinition {
 
     act::core::types::ToolDefinition {
         name: tool.name.clone(),
-        description: vec![(DEFAULT_LANG.to_string(), tool.description.clone())],
+        description: act::core::types::LocalizedString::Plain(tool.description.clone()),
         parameters_schema: schema_str,
         metadata,
     }
@@ -319,11 +320,11 @@ impl exports::act::core::tool_provider::Guest for OpenApiBridge {
             name: "openapi-bridge".to_string(),
             version: "0.1.0".to_string(),
             default_language: DEFAULT_LANG.to_string(),
-            description: vec![(DEFAULT_LANG.to_string(), "Dynamically exposes OpenAPI endpoints as ACT tools".to_string())],
+            description: act::core::types::LocalizedString::Plain("Dynamically exposes OpenAPI endpoints as ACT tools".to_string()),
             capabilities: vec![act::core::types::Capability {
                 id: "wasi:http/outgoing-handler".to_string(),
                 required: true,
-                description: Some(vec![(DEFAULT_LANG.to_string(), "HTTP client for fetching specs and making API calls".to_string())]),
+                description: Some(act::core::types::LocalizedString::Plain("HTTP client for fetching specs and making API calls".to_string())),
                 metadata: vec![],
             }],
             metadata: vec![],
