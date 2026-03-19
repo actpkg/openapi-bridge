@@ -28,10 +28,7 @@ pub fn build_request(
         match param.location {
             ParamLocation::Path => {
                 if let Some(val) = args_obj.get(&param.name) {
-                    let val_str = match val {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    };
+                    let val_str = json_value_to_string(val);
                     path = path.replace(&format!("{{{}}}", param.name), &val_str);
                     body_args.remove(&param.name);
                 } else {
@@ -44,32 +41,26 @@ pub fn build_request(
         }
     }
 
-    // 2. Build query string
-    let query_params: Vec<String> = tool
-        .parameters
-        .iter()
-        .filter(|p| p.location == ParamLocation::Query)
-        .filter_map(|p| {
-            args_obj.get(&p.name).map(|v| {
-                let val_str = match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                format!("{}={}", percent_encode(&p.name), percent_encode(&val_str))
-            })
-        })
-        .collect();
+    // 2. Build URL with query parameters using url crate
+    let raw_url = format!("{}{}", base_url.trim_end_matches('/'), path);
+    let mut url = url::Url::parse(&raw_url)
+        .map_err(|e| format!("Invalid URL '{}': {}", raw_url, e))?;
 
-    let url = if query_params.is_empty() {
-        format!("{}{}", base_url.trim_end_matches('/'), path)
-    } else {
-        format!(
-            "{}{}?{}",
-            base_url.trim_end_matches('/'),
-            path,
-            query_params.join("&")
-        )
-    };
+    {
+        let mut query_pairs = url.query_pairs_mut();
+        for param in &tool.parameters {
+            if param.location == ParamLocation::Query {
+                if let Some(val) = args_obj.get(&param.name) {
+                    query_pairs.append_pair(&param.name, &json_value_to_string(val));
+                }
+            }
+        }
+        // Drop empty query string
+        query_pairs.finish();
+    }
+    if url.query() == Some("") {
+        url.set_query(None);
+    }
 
     // 3. Merge headers: config defaults + param headers + call overrides
     let mut headers: Vec<(String, String)> = config_headers
@@ -81,11 +72,7 @@ pub fn build_request(
         if param.location == ParamLocation::Header
             && let Some(val) = args_obj.get(&param.name)
         {
-            let val_str = match val {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-            headers.push((param.name.clone(), val_str));
+            headers.push((param.name.clone(), json_value_to_string(val)));
         }
     }
 
@@ -105,15 +92,17 @@ pub fn build_request(
 
     Ok(PreparedRequest {
         method: tool.method.to_uppercase(),
-        url,
+        url: url.to_string(),
         headers,
         body,
     })
 }
 
-/// Percent-encode a string for use in query parameters.
-fn percent_encode(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
+fn json_value_to_string(val: &serde_json::Value) -> String {
+    match val {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
 }
 
 /// Extract per-call headers from tool-call metadata.

@@ -11,7 +11,7 @@ serde_yml = "0.0.12"
 schemars = "1"
 wasip3 = "0.4"
 act-types = "0.2.3"
-percent-encoding = "2"
+url = "2"
 
 [build-dependencies]
 ciborium = "0.2"
