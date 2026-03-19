@@ -111,21 +111,9 @@ pub fn build_request(
     })
 }
 
-/// Minimal percent-encoding for query parameters.
+/// Percent-encode a string for use in query parameters.
 fn percent_encode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                result.push(byte as char);
-            }
-            _ => {
-                result.push('%');
-                result.push_str(&format!("{:02X}", byte));
-            }
-        }
-    }
-    result
+    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
 }
 
 /// Extract per-call headers from tool-call metadata.
