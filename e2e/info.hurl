@@ -1,5 +1,5 @@
-GET {{host}}/info
+GET {{baseurl}}/info
 HTTP 200
 [Asserts]
-jsonpath "$.name" == "openapi-bridge"
-jsonpath "$.version" isString
+jsonpath "$['std:name']" == "openapi-bridge"
+jsonpath "$['std:version']" isString

@@ -1,3 +1,4 @@
-# openapi-bridge requires config — without it, returns error
-POST {{host}}/tools
+# openapi-bridge requires metadata — without it, returns error
+POST {{baseurl}}/tools
+{}
 HTTP *

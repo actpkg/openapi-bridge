@@ -12,11 +12,24 @@ wit_bindgen::generate!({
     generate_all,
 });
 
+// WASM custom sections for component metadata.
+// SAFETY: link_section places data in named WASM custom sections; no executable code.
+#[unsafe(link_section = "act:component")]
+#[used]
+static _ACT_COMPONENT: [u8; include_bytes!(concat!(env!("OUT_DIR"), "/act_component.cbor")).len()] =
+    *include_bytes!(concat!(env!("OUT_DIR"), "/act_component.cbor"));
+
+#[unsafe(link_section = "version")]
+#[used]
+static _VERSION: [u8; 5] = *b"0.1.0";
+
+#[unsafe(link_section = "description")]
+#[used]
+static _DESCRIPTION: [u8; 50] = *b"Dynamically exposes OpenAPI endpoints as ACT tools";
+
 struct OpenApiBridge;
 
 export!(OpenApiBridge);
-
-const DEFAULT_LANG: &str = "en";
 
 fn make_error(kind: &str, msg: String) -> act::core::types::ToolError {
     act::core::types::ToolError {
@@ -26,19 +39,41 @@ fn make_error(kind: &str, msg: String) -> act::core::types::ToolError {
     }
 }
 
-fn parse_config(config: Option<&[u8]>) -> Result<BridgeConfig, act::core::types::ToolError> {
-    match config {
-        Some(bytes) => cbor::from_cbor::<BridgeConfig>(bytes).map_err(|e| {
+fn parse_config_from_metadata(
+    metadata: &[(String, Vec<u8>)],
+) -> Result<BridgeConfig, act::core::types::ToolError> {
+    let spec_url = metadata
+        .iter()
+        .find(|(k, _)| k == "spec_url")
+        .map(|(_, v)| cbor::from_cbor::<String>(v))
+        .transpose()
+        .map_err(|e| {
             make_error(
                 act_types::constants::ERR_INVALID_ARGS,
-                format!("Invalid config: {e}"),
+                format!("Invalid spec_url: {e}"),
             )
-        }),
-        None => Err(make_error(
-            act_types::constants::ERR_INVALID_ARGS,
-            "Config with spec_url is required".to_string(),
-        )),
-    }
+        })?
+        .ok_or_else(|| {
+            make_error(
+                act_types::constants::ERR_INVALID_ARGS,
+                "Missing 'spec_url' in metadata".to_string(),
+            )
+        })?;
+
+    let headers: std::collections::BTreeMap<String, String> = metadata
+        .iter()
+        .find(|(k, _)| k == "headers")
+        .map(|(_, v)| cbor::from_cbor(v))
+        .transpose()
+        .map_err(|e| {
+            make_error(
+                act_types::constants::ERR_INVALID_ARGS,
+                format!("Invalid headers: {e}"),
+            )
+        })?
+        .unwrap_or_default();
+
+    Ok(BridgeConfig { spec_url, headers })
 }
 
 /// Extract the origin (scheme + authority) from a URL.
@@ -107,7 +142,7 @@ async fn fetch_spec(url: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to fetch spec: {e:?}"))?;
 
     let status = response.get_status_code();
-    if status < 200 || status >= 300 {
+    if !(200..300).contains(&status) {
         return Err(format!("Spec fetch returned HTTP {status}"));
     }
 
@@ -264,7 +299,7 @@ async fn send_api_request(
     let status = response.get_status_code();
     let resp_headers = response.get_headers();
     let content_type = resp_headers
-        .get(&"content-type".to_string())
+        .get("content-type")
         .first()
         .map(|v| String::from_utf8_lossy(v).to_string());
 
@@ -315,34 +350,15 @@ async fn send_api_request(
 }
 
 impl exports::act::core::tool_provider::Guest for OpenApiBridge {
-    fn get_info() -> act::core::types::ComponentInfo {
-        act::core::types::ComponentInfo {
-            name: "openapi-bridge".to_string(),
-            version: "0.1.0".to_string(),
-            default_language: DEFAULT_LANG.to_string(),
-            description: act::core::types::LocalizedString::Plain("Dynamically exposes OpenAPI endpoints as ACT tools".to_string()),
-            capabilities: vec![act::core::types::Capability {
-                id: "wasi:http/outgoing-handler".to_string(),
-                required: true,
-                description: Some(act::core::types::LocalizedString::Plain("HTTP client for fetching specs and making API calls".to_string())),
-                metadata: vec![],
-            }],
-            metadata: vec![],
-        }
-    }
-
-    fn get_config_schema() -> Option<String> {
+    async fn get_metadata_schema(_metadata: Vec<(String, Vec<u8>)>) -> Option<String> {
         let schema = schemars::schema_for!(BridgeConfig);
-        Some(
-            serde_json::to_string(&schema)
-                .unwrap_or_else(|_| r#"{"type":"object"}"#.to_string()),
-        )
+        Some(serde_json::to_string(&schema).unwrap_or_else(|_| r#"{"type":"object"}"#.to_string()))
     }
 
     async fn list_tools(
-        config: Option<Vec<u8>>,
+        metadata: Vec<(String, Vec<u8>)>,
     ) -> Result<act::core::types::ListToolsResponse, act::core::types::ToolError> {
-        let config = parse_config(config.as_deref())?;
+        let config = parse_config_from_metadata(&metadata)?;
         let resolved = get_or_fetch_tools(&config)
             .await
             .map_err(|e| make_error(act_types::constants::ERR_INTERNAL, e))?;
@@ -357,13 +373,12 @@ impl exports::act::core::tool_provider::Guest for OpenApiBridge {
     }
 
     async fn call_tool(
-        config: Option<Vec<u8>>,
         call: act::core::types::ToolCall,
     ) -> wit_bindgen::rt::async_support::StreamReader<act::core::types::StreamEvent> {
         let (mut writer, reader) = wit_stream::new::<act::core::types::StreamEvent>();
 
         wit_bindgen::spawn(async move {
-            let config = match parse_config(config.as_deref()) {
+            let config = match parse_config_from_metadata(&call.metadata) {
                 Ok(c) => c,
                 Err(e) => {
                     let _ = writer
@@ -395,9 +410,10 @@ impl exports::act::core::tool_provider::Guest for OpenApiBridge {
                         },
                         Err(e) => {
                             let _ = writer
-                                .write_all(vec![act::core::types::StreamEvent::Error(
-                                    make_error(act_types::constants::ERR_INTERNAL, e),
-                                )])
+                                .write_all(vec![act::core::types::StreamEvent::Error(make_error(
+                                    act_types::constants::ERR_INTERNAL,
+                                    e,
+                                ))])
                                 .await;
                             return;
                         }

@@ -14,8 +14,10 @@ pub struct BridgeConfig {
 /// Minimal OpenAPI 3.x document model.
 #[derive(Debug, Deserialize)]
 pub struct OpenApiSpec {
+    #[expect(dead_code)]
     pub openapi: String,
     #[serde(default)]
+    #[expect(dead_code)]
     pub info: SpecInfo,
     #[serde(default)]
     pub servers: Vec<Server>,
@@ -26,8 +28,10 @@ pub struct OpenApiSpec {
 #[derive(Debug, Default, Deserialize)]
 pub struct SpecInfo {
     #[serde(default)]
+    #[expect(dead_code)]
     pub title: String,
     #[serde(default)]
+    #[expect(dead_code)]
     pub version: String,
 }
 
@@ -75,6 +79,7 @@ pub struct Parameter {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RequestBody {
+    #[expect(dead_code)]
     pub description: Option<String>,
     #[serde(default)]
     pub required: bool,
@@ -103,13 +108,27 @@ impl PathItem {
     /// Iterate over (method_str, operation) pairs.
     pub fn operations(&self) -> Vec<(&str, &Operation)> {
         let mut ops = Vec::new();
-        if let Some(op) = &self.get { ops.push(("get", op)); }
-        if let Some(op) = &self.post { ops.push(("post", op)); }
-        if let Some(op) = &self.put { ops.push(("put", op)); }
-        if let Some(op) = &self.patch { ops.push(("patch", op)); }
-        if let Some(op) = &self.delete { ops.push(("delete", op)); }
-        if let Some(op) = &self.head { ops.push(("head", op)); }
-        if let Some(op) = &self.options { ops.push(("options", op)); }
+        if let Some(op) = &self.get {
+            ops.push(("get", op));
+        }
+        if let Some(op) = &self.post {
+            ops.push(("post", op));
+        }
+        if let Some(op) = &self.put {
+            ops.push(("put", op));
+        }
+        if let Some(op) = &self.patch {
+            ops.push(("patch", op));
+        }
+        if let Some(op) = &self.delete {
+            ops.push(("delete", op));
+        }
+        if let Some(op) = &self.head {
+            ops.push(("head", op));
+        }
+        if let Some(op) = &self.options {
+            ops.push(("options", op));
+        }
         ops
     }
 }

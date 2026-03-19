@@ -55,11 +55,7 @@ pub fn build_request(
                     serde_json::Value::String(s) => s.clone(),
                     other => other.to_string(),
                 };
-                format!(
-                    "{}={}",
-                    percent_encode(&p.name),
-                    percent_encode(&val_str)
-                )
+                format!("{}={}", percent_encode(&p.name), percent_encode(&val_str))
             })
         })
         .collect();
@@ -82,14 +78,14 @@ pub fn build_request(
         .collect();
 
     for param in &tool.parameters {
-        if param.location == ParamLocation::Header {
-            if let Some(val) = args_obj.get(&param.name) {
-                let val_str = match val {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                headers.push((param.name.clone(), val_str));
-            }
+        if param.location == ParamLocation::Header
+            && let Some(val) = args_obj.get(&param.name)
+        {
+            let val_str = match val {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            headers.push((param.name.clone(), val_str));
         }
     }
 
@@ -177,7 +173,10 @@ mod tests {
             ],
             body_schema: None,
             body_required: false,
-            metadata_flags: ToolFlags { read_only: true, ..Default::default() },
+            metadata_flags: ToolFlags {
+                read_only: true,
+                ..Default::default()
+            },
         }
     }
 
@@ -186,12 +185,19 @@ mod tests {
         let tool = make_tool();
         let args = json!({"id": "123", "fields": "name,email"});
         let req = build_request(
-            &tool, &args, "https://api.example.com",
-            &BTreeMap::new(), &[],
-        ).unwrap();
+            &tool,
+            &args,
+            "https://api.example.com",
+            &BTreeMap::new(),
+            &[],
+        )
+        .unwrap();
 
         assert_eq!(req.method, "GET");
-        assert_eq!(req.url, "https://api.example.com/users/123?fields=name%2Cemail");
+        assert_eq!(
+            req.url,
+            "https://api.example.com/users/123?fields=name%2Cemail"
+        );
         assert!(req.body.is_none());
     }
 
@@ -203,12 +209,21 @@ mod tests {
             method: "post".to_string(),
             path_template: "/users".to_string(),
             parameters: vec![],
-            body_schema: Some(json!({"type": "object", "properties": {"name": {"type": "string"}}})),
+            body_schema: Some(
+                json!({"type": "object", "properties": {"name": {"type": "string"}}}),
+            ),
             body_required: true,
             metadata_flags: ToolFlags::default(),
         };
         let args = json!({"name": "Alice"});
-        let req = build_request(&tool, &args, "https://api.example.com", &BTreeMap::new(), &[]).unwrap();
+        let req = build_request(
+            &tool,
+            &args,
+            "https://api.example.com",
+            &BTreeMap::new(),
+            &[],
+        )
+        .unwrap();
 
         assert_eq!(req.method, "POST");
         assert_eq!(req.url, "https://api.example.com/users");
@@ -227,33 +242,64 @@ mod tests {
 
         let call_headers = vec![("authorization".to_string(), "Bearer new".to_string())];
 
-        let req = build_request(&tool, &args, "https://api.example.com", &config_headers, &call_headers).unwrap();
+        let req = build_request(
+            &tool,
+            &args,
+            "https://api.example.com",
+            &config_headers,
+            &call_headers,
+        )
+        .unwrap();
 
-        let auth_headers: Vec<_> = req.headers.iter().filter(|(k, _)| k == "authorization").collect();
+        let auth_headers: Vec<_> = req
+            .headers
+            .iter()
+            .filter(|(k, _)| k == "authorization")
+            .collect();
         assert_eq!(auth_headers.len(), 1);
         assert_eq!(auth_headers[0].1, "Bearer new");
-        assert!(req.headers.iter().any(|(k, v)| k == "x-api-key" && v == "key123"));
+        assert!(
+            req.headers
+                .iter()
+                .any(|(k, v)| k == "x-api-key" && v == "key123")
+        );
     }
 
     #[test]
     fn missing_path_param_returns_error() {
         let tool = make_tool();
         let args = json!({"fields": "name"});
-        let result = build_request(&tool, &args, "https://api.example.com", &BTreeMap::new(), &[]);
+        let result = build_request(
+            &tool,
+            &args,
+            "https://api.example.com",
+            &BTreeMap::new(),
+            &[],
+        );
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Missing required path parameter: id"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Missing required path parameter: id")
+        );
     }
 
     #[test]
     fn extract_call_headers_from_metadata() {
         let metadata = vec![
-            ("http:header:authorization".to_string(), b"Bearer tok".to_vec()),
+            (
+                "http:header:authorization".to_string(),
+                b"Bearer tok".to_vec(),
+            ),
             ("http:header:x-custom".to_string(), b"val".to_vec()),
             ("other:key".to_string(), b"ignored".to_vec()),
         ];
         let headers = extract_call_headers(&metadata);
         assert_eq!(headers.len(), 2);
-        assert_eq!(headers[0], ("authorization".to_string(), "Bearer tok".to_string()));
+        assert_eq!(
+            headers[0],
+            ("authorization".to_string(), "Bearer tok".to_string())
+        );
         assert_eq!(headers[1], ("x-custom".to_string(), "val".to_string()));
     }
 }

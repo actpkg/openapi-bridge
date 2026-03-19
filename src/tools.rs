@@ -61,9 +61,18 @@ pub fn generate_tool_name(method: &str, path: &str) -> String {
 
 fn flags_for_method(method: &str) -> ToolFlags {
     match method {
-        "get" | "head" | "options" => ToolFlags { read_only: true, ..Default::default() },
-        "put" => ToolFlags { idempotent: true, ..Default::default() },
-        "delete" => ToolFlags { destructive: true, ..Default::default() },
+        "get" | "head" | "options" => ToolFlags {
+            read_only: true,
+            ..Default::default()
+        },
+        "put" => ToolFlags {
+            idempotent: true,
+            ..Default::default()
+        },
+        "delete" => ToolFlags {
+            destructive: true,
+            ..Default::default()
+        },
         _ => ToolFlags::default(),
     }
 }
@@ -84,10 +93,10 @@ pub fn build_parameters_schema(tool: &ResolvedTool) -> serde_json::Value {
 
     for param in &tool.parameters {
         let mut schema = param.schema.clone();
-        if let Some(desc) = &param.description {
-            if let serde_json::Value::Object(ref mut map) = schema {
-                map.insert("description".to_string(), json!(desc));
-            }
+        if let Some(desc) = &param.description
+            && let serde_json::Value::Object(ref mut map) = schema
+        {
+            map.insert("description".to_string(), json!(desc));
         }
         properties.insert(param.name.clone(), schema);
         if param.required {
@@ -97,20 +106,16 @@ pub fn build_parameters_schema(tool: &ResolvedTool) -> serde_json::Value {
 
     // Add request body properties
     if let Some(body_schema) = &tool.body_schema {
-        if let Some(body_props) = body_schema.get("properties") {
-            if let serde_json::Value::Object(bp) = body_props {
-                for (k, v) in bp {
-                    properties.insert(k.clone(), v.clone());
-                }
+        if let Some(serde_json::Value::Object(bp)) = body_schema.get("properties") {
+            for (k, v) in bp {
+                properties.insert(k.clone(), v.clone());
             }
         }
         // Merge body required fields
-        if let Some(body_req) = body_schema.get("required") {
-            if let serde_json::Value::Array(br) = body_req {
-                if tool.body_required {
-                    required.extend(br.iter().cloned());
-                }
-            }
+        if let Some(serde_json::Value::Array(br)) = body_schema.get("required")
+            && tool.body_required
+        {
+            required.extend(br.iter().cloned());
         }
     }
 
@@ -152,7 +157,11 @@ pub fn extract_tools(spec: &OpenApiSpec) -> Vec<ResolvedTool> {
                     params.push(ResolvedParam {
                         name: p.name.clone(),
                         location: loc,
-                        required: if p.location == "path" { true } else { p.required },
+                        required: if p.location == "path" {
+                            true
+                        } else {
+                            p.required
+                        },
                         description: p.description.clone(),
                         schema: p.schema.clone().unwrap_or(json!({"type": "string"})),
                     });
@@ -166,7 +175,11 @@ pub fn extract_tools(spec: &OpenApiSpec) -> Vec<ResolvedTool> {
                     params.push(ResolvedParam {
                         name: p.name.clone(),
                         location: loc,
-                        required: if p.location == "path" { true } else { p.required },
+                        required: if p.location == "path" {
+                            true
+                        } else {
+                            p.required
+                        },
                         description: p.description.clone(),
                         schema: p.schema.clone().unwrap_or(json!({"type": "string"})),
                     });
@@ -248,7 +261,8 @@ mod tests {
 
     #[test]
     fn extract_tools_uses_operation_id() {
-        let spec = OpenApiSpec::parse(r#"{
+        let spec = OpenApiSpec::parse(
+            r#"{
             "openapi": "3.0.3",
             "info": {"title":"T","version":"1"},
             "paths": {
@@ -256,7 +270,9 @@ mod tests {
                     "get": {"operationId": "listUsers", "summary": "List users"}
                 }
             }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let tools = extract_tools(&spec);
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "listUsers");
@@ -266,7 +282,8 @@ mod tests {
 
     #[test]
     fn extract_tools_generates_name_when_no_operation_id() {
-        let spec = OpenApiSpec::parse(r#"{
+        let spec = OpenApiSpec::parse(
+            r#"{
             "openapi": "3.0.3",
             "info": {"title":"T","version":"1"},
             "paths": {
@@ -274,7 +291,9 @@ mod tests {
                     "delete": {"summary": "Delete a pet"}
                 }
             }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let tools = extract_tools(&spec);
         assert_eq!(tools[0].name, "delete_pets_by_petId");
         assert!(tools[0].metadata_flags.destructive);
@@ -282,7 +301,8 @@ mod tests {
 
     #[test]
     fn extract_tools_merges_path_and_op_params() {
-        let spec = OpenApiSpec::parse(r#"{
+        let spec = OpenApiSpec::parse(
+            r#"{
             "openapi": "3.0.3",
             "info": {"title":"T","version":"1"},
             "paths": {
@@ -298,7 +318,9 @@ mod tests {
                     }
                 }
             }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let tools = extract_tools(&spec);
         assert_eq!(tools[0].parameters.len(), 2);
         assert_eq!(tools[0].parameters[1].name, "id"); // from path-level
