@@ -1,12 +1,13 @@
 use crate::tools::{ParamLocation, ResolvedTool};
+use http::{HeaderMap, HeaderName, HeaderValue, Method};
 use std::collections::BTreeMap;
 
 /// A prepared HTTP request ready to be sent via wasip3.
 #[derive(Debug)]
 pub struct PreparedRequest {
-    pub method: String,
+    pub method: Method,
     pub url: String,
-    pub headers: Vec<(String, String)>,
+    pub headers: HeaderMap,
     pub body: Option<Vec<u8>>,
 }
 
@@ -41,10 +42,10 @@ pub fn build_request(
         }
     }
 
-    // 2. Build URL with query parameters using url crate
+    // 2. Build URL with query parameters
     let raw_url = format!("{}{}", base_url.trim_end_matches('/'), path);
-    let mut url = url::Url::parse(&raw_url)
-        .map_err(|e| format!("Invalid URL '{}': {}", raw_url, e))?;
+    let mut url =
+        url::Url::parse(&raw_url).map_err(|e| format!("Invalid URL '{}': {}", raw_url, e))?;
 
     {
         let mut query_pairs = url.query_pairs_mut();
@@ -55,7 +56,6 @@ pub fn build_request(
                 }
             }
         }
-        // Drop empty query string
         query_pairs.finish();
     }
     if url.query() == Some("") {
@@ -63,35 +63,55 @@ pub fn build_request(
     }
 
     // 3. Merge headers: config defaults + param headers + call overrides
-    let mut headers: Vec<(String, String)> = config_headers
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    let mut headers = HeaderMap::new();
+
+    for (k, v) in config_headers {
+        if let (Ok(name), Ok(value)) = (k.parse::<HeaderName>(), v.parse::<HeaderValue>()) {
+            headers.insert(name, value);
+        }
+    }
 
     for param in &tool.parameters {
         if param.location == ParamLocation::Header
             && let Some(val) = args_obj.get(&param.name)
         {
-            headers.push((param.name.clone(), json_value_to_string(val)));
+            let val_str = json_value_to_string(val);
+            if let (Ok(name), Ok(value)) = (
+                param.name.parse::<HeaderName>(),
+                val_str.parse::<HeaderValue>(),
+            ) {
+                headers.insert(name, value);
+            }
         }
     }
 
-    // Call headers override (by name, case-insensitive)
+    // Call headers override
     for (k, v) in call_headers {
-        headers.retain(|(existing_k, _)| !existing_k.eq_ignore_ascii_case(k));
-        headers.push((k.clone(), v.clone()));
+        if let (Ok(name), Ok(value)) = (k.parse::<HeaderName>(), v.parse::<HeaderValue>()) {
+            headers.insert(name, value);
+        }
     }
 
     // 4. Build body from remaining args (if operation has a request body)
     let body = if tool.body_schema.is_some() && !body_args.is_empty() {
-        headers.push(("content-type".to_string(), "application/json".to_string()));
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
         Some(serde_json::to_vec(&body_args).unwrap())
     } else {
         None
     };
 
+    // 5. Parse method
+    let method = tool
+        .method
+        .to_uppercase()
+        .parse::<Method>()
+        .map_err(|e| format!("Invalid HTTP method '{}': {}", tool.method, e))?;
+
     Ok(PreparedRequest {
-        method: tool.method.to_uppercase(),
+        method,
         url: url.to_string(),
         headers,
         body,
@@ -170,7 +190,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(req.method, "GET");
+        assert_eq!(req.method, Method::GET);
         assert_eq!(
             req.url,
             "https://api.example.com/users/123?fields=name%2Cemail"
@@ -202,7 +222,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(req.method, "POST");
+        assert_eq!(req.method, Method::POST);
         assert_eq!(req.url, "https://api.example.com/users");
         assert!(req.body.is_some());
         let body: serde_json::Value = serde_json::from_slice(&req.body.unwrap()).unwrap();
@@ -228,18 +248,8 @@ mod tests {
         )
         .unwrap();
 
-        let auth_headers: Vec<_> = req
-            .headers
-            .iter()
-            .filter(|(k, _)| k == "authorization")
-            .collect();
-        assert_eq!(auth_headers.len(), 1);
-        assert_eq!(auth_headers[0].1, "Bearer new");
-        assert!(
-            req.headers
-                .iter()
-                .any(|(k, v)| k == "x-api-key" && v == "key123")
-        );
+        assert_eq!(req.headers.get("authorization").unwrap(), "Bearer new");
+        assert_eq!(req.headers.get("x-api-key").unwrap(), "key123");
     }
 
     #[test]

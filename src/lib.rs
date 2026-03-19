@@ -248,21 +248,21 @@ async fn send_api_request(
         }
     };
 
-    let method = match prepared.method.as_str() {
-        "GET" => Method::Get,
-        "POST" => Method::Post,
-        "PUT" => Method::Put,
-        "DELETE" => Method::Delete,
-        "PATCH" => Method::Patch,
-        "HEAD" => Method::Head,
-        "OPTIONS" => Method::Options,
-        other => Method::Other(other.to_string()),
+    let method = match prepared.method {
+        http::Method::GET => Method::Get,
+        http::Method::POST => Method::Post,
+        http::Method::PUT => Method::Put,
+        http::Method::DELETE => Method::Delete,
+        http::Method::PATCH => Method::Patch,
+        http::Method::HEAD => Method::Head,
+        http::Method::OPTIONS => Method::Options,
+        ref other => Method::Other(other.to_string()),
     };
 
     let header_list: Vec<(String, Vec<u8>)> = prepared
         .headers
         .iter()
-        .map(|(k, v)| (k.clone(), v.as_bytes().to_vec()))
+        .map(|(k, v)| (k.to_string(), v.as_bytes().to_vec()))
         .collect();
     let fields = Fields::from_list(&header_list).unwrap();
 

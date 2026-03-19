@@ -12,6 +12,7 @@ schemars = "1"
 wasip3 = "0.4"
 act-types = "0.2.3"
 url = "2"
+http = "1"
 
 [build-dependencies]
 ciborium = "0.2"
