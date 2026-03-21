@@ -50,10 +50,10 @@ pub fn build_request(
     {
         let mut query_pairs = url.query_pairs_mut();
         for param in &tool.parameters {
-            if param.location == ParamLocation::Query {
-                if let Some(val) = args_obj.get(&param.name) {
-                    query_pairs.append_pair(&param.name, &json_value_to_string(val));
-                }
+            if param.location == ParamLocation::Query
+                && let Some(val) = args_obj.get(&param.name)
+            {
+                query_pairs.append_pair(&param.name, &json_value_to_string(val));
             }
         }
         query_pairs.finish();

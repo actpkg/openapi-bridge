@@ -99,69 +99,28 @@ fn resolve_base_url(spec_url: &str, server_url: &str) -> String {
     }
 }
 
-/// Parse a URL into (scheme, authority, path_and_query).
-fn parse_url(url: &str) -> Result<(&str, &str, &str), String> {
-    let (scheme, rest) = url
-        .split_once("://")
-        .ok_or_else(|| format!("Invalid URL (no scheme): {url}"))?;
-    let (authority, path) = match rest.find('/') {
-        Some(i) => (&rest[..i], &rest[i..]),
-        None => (rest, "/"),
-    };
-    Ok((scheme, authority, path))
-}
-
-/// Fetch the OpenAPI spec from a URL using wasip3 HTTP client.
+/// Fetch the OpenAPI spec from a URL using wasi-fetch.
 async fn fetch_spec(url: &str) -> Result<String, String> {
-    use wasip3::http::types::{ErrorCode, Fields, Method, Request, Response, Scheme};
-
-    let (scheme_str, authority, path) = parse_url(url)?;
-    let scheme = match scheme_str {
-        "https" => Scheme::Https,
-        "http" => Scheme::Http,
-        _ => return Err(format!("Unsupported scheme: {scheme_str}")),
-    };
-
-    let headers = Fields::from_list(&[(
-        "accept".to_string(),
-        b"application/json, application/yaml, text/yaml, */*".to_vec(),
-    )])
-    .unwrap();
-
-    let (_, trailers_reader) =
-        wasip3::wit_future::new::<Result<Option<Fields>, ErrorCode>>(|| Ok(None));
-
-    let (request, _) = Request::new(headers, None, trailers_reader, None);
-    let _ = request.set_method(&Method::Get);
-    let _ = request.set_scheme(Some(&scheme));
-    let _ = request.set_authority(Some(authority));
-    let _ = request.set_path_with_query(Some(path));
-
-    let response = wasip3::http::client::send(request)
+    let response = wasi_fetch::Client::new()
+        .get(url)
+        .header(
+            "accept",
+            "application/json, application/yaml, text/yaml, */*",
+        )
+        .send()
         .await
-        .map_err(|e| format!("Failed to fetch spec: {e:?}"))?;
+        .map_err(|e| format!("Failed to fetch spec: {e}"))?;
 
-    let status = response.get_status_code();
+    let status = response.status().as_u16();
     if !(200..300).contains(&status) {
         return Err(format!("Spec fetch returned HTTP {status}"));
     }
 
-    let (_, result_reader) = wasip3::wit_future::new::<Result<(), ErrorCode>>(|| Ok(()));
-    let (mut body_stream, _trailers) = Response::consume_body(response, result_reader);
-
-    let mut all_bytes = Vec::new();
-    loop {
-        let (result, chunk) = body_stream.read(Vec::with_capacity(16384)).await;
-        match result {
-            wasip3::wit_bindgen::StreamResult::Complete(_) => {
-                all_bytes.extend_from_slice(&chunk);
-            }
-            wasip3::wit_bindgen::StreamResult::Dropped
-            | wasip3::wit_bindgen::StreamResult::Cancelled => break,
-        }
-    }
-
-    String::from_utf8(all_bytes).map_err(|e| format!("Spec response is not valid UTF-8: {e}"))
+    response
+        .into_body()
+        .text()
+        .await
+        .map_err(|e| format!("Spec response is not valid UTF-8: {e}"))
 }
 
 /// Fetch spec (or use cache), parse, and return tools.
@@ -214,138 +173,67 @@ fn to_wit_tool(tool: &tools::ResolvedTool) -> act::core::types::ToolDefinition {
     }
 }
 
-/// Send an HTTP request via wasip3 and stream the response back.
+/// Send an HTTP request via wasi-fetch and stream the response back.
 async fn send_api_request(
     prepared: request::PreparedRequest,
     writer: &mut wit_bindgen::StreamWriter<act::core::types::StreamEvent>,
 ) {
-    use wasip3::http::types::{ErrorCode, Fields, Method, Request, Response, Scheme};
+    let mut builder = wasi_fetch::Client::new()
+        .request(prepared.method, &prepared.url)
+        .redirect_limit(0);
 
-    let (scheme_str, authority, path) = match parse_url(&prepared.url) {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = writer
-                .write_all(vec![act::core::types::StreamEvent::Error(make_error(
-                    act_types::constants::ERR_INTERNAL,
-                    format!("Invalid URL: {e}"),
-                ))])
-                .await;
-            return;
+    for (name, value) in prepared.headers.iter() {
+        if let Ok(v) = value.to_str() {
+            builder = builder.header(name.as_str(), v);
         }
-    };
+    }
 
-    let scheme = match scheme_str {
-        "https" => Scheme::Https,
-        "http" => Scheme::Http,
-        _ => {
-            let _ = writer
-                .write_all(vec![act::core::types::StreamEvent::Error(make_error(
-                    act_types::constants::ERR_INTERNAL,
-                    format!("Unsupported scheme: {scheme_str}"),
-                ))])
-                .await;
-            return;
-        }
-    };
+    if let Some(body) = prepared.body {
+        builder = builder.body(body);
+    }
 
-    let method = match prepared.method {
-        http::Method::GET => Method::Get,
-        http::Method::POST => Method::Post,
-        http::Method::PUT => Method::Put,
-        http::Method::DELETE => Method::Delete,
-        http::Method::PATCH => Method::Patch,
-        http::Method::HEAD => Method::Head,
-        http::Method::OPTIONS => Method::Options,
-        ref other => Method::Other(other.to_string()),
-    };
-
-    let header_list: Vec<(String, Vec<u8>)> = prepared
-        .headers
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.as_bytes().to_vec()))
-        .collect();
-    let fields = Fields::from_list(&header_list).unwrap();
-
-    let body_stream = prepared.body.map(|body_bytes| {
-        let (mut body_writer, body_reader) = wasip3::wit_stream::new::<u8>();
-        wit_bindgen::spawn(async move {
-            body_writer.write_all(body_bytes).await;
-        });
-        body_reader
-    });
-
-    let (_, trailers_reader) =
-        wasip3::wit_future::new::<Result<Option<Fields>, ErrorCode>>(|| Ok(None));
-
-    let (request, _) = Request::new(fields, body_stream, trailers_reader, None);
-    let _ = request.set_method(&method);
-    let _ = request.set_scheme(Some(&scheme));
-    let _ = request.set_authority(Some(authority));
-    let _ = request.set_path_with_query(Some(path));
-
-    let response = match wasip3::http::client::send(request).await {
+    let response = match builder.send().await {
         Ok(r) => r,
         Err(e) => {
             let _ = writer
                 .write_all(vec![act::core::types::StreamEvent::Error(make_error(
                     act_types::constants::ERR_INTERNAL,
-                    format!("HTTP error: {e:?}"),
+                    format!("HTTP error: {e}"),
                 ))])
                 .await;
             return;
         }
     };
 
-    let status = response.get_status_code();
-    let resp_headers = response.get_headers();
-    let content_type = resp_headers
+    let status = response.status().as_u16();
+    let content_type = response
+        .headers()
         .get("content-type")
-        .first()
-        .map(|v| String::from_utf8_lossy(v).to_string());
-
-    let (_, result_reader) = wasip3::wit_future::new::<Result<(), ErrorCode>>(|| Ok(()));
-    let (mut body_stream, _trailers) = Response::consume_body(response, result_reader);
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
 
     if status >= 400 {
-        let mut error_bytes = Vec::new();
-        loop {
-            let (result, chunk) = body_stream.read(Vec::with_capacity(4096)).await;
-            match result {
-                wasip3::wit_bindgen::StreamResult::Complete(_) => {
-                    error_bytes.extend_from_slice(&chunk);
-                }
-                _ => break,
-            }
-        }
-        let error_body = String::from_utf8_lossy(&error_bytes);
+        let body = response.into_body().text().await.unwrap_or_default();
         let _ = writer
             .write_all(vec![act::core::types::StreamEvent::Error(make_error(
                 act_types::constants::ERR_INTERNAL,
-                format!("HTTP {status}: {error_body}"),
+                format!("HTTP {status}: {body}"),
             ))])
             .await;
         return;
     }
 
-    let mut buf = Vec::with_capacity(16384);
-    loop {
-        let (result, chunk) = body_stream.read(buf).await;
-        match result {
-            wasip3::wit_bindgen::StreamResult::Complete(_) => {
-                let _ = writer
-                    .write_all(vec![act::core::types::StreamEvent::Content(
-                        act::core::types::ContentPart {
-                            data: chunk,
-                            mime_type: content_type.clone(),
-                            metadata: vec![],
-                        },
-                    )])
-                    .await;
-                buf = Vec::with_capacity(16384);
-            }
-            wasip3::wit_bindgen::StreamResult::Dropped
-            | wasip3::wit_bindgen::StreamResult::Cancelled => break,
-        }
+    let mut body = response.into_body();
+    while let Some(chunk) = body.chunk().await {
+        let _ = writer
+            .write_all(vec![act::core::types::StreamEvent::Content(
+                act::core::types::ContentPart {
+                    data: chunk.to_vec(),
+                    mime_type: content_type.clone(),
+                    metadata: vec![],
+                },
+            )])
+            .await;
     }
 }
 
