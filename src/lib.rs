@@ -161,7 +161,7 @@ fn to_wit_tool(tool: &tools::ResolvedTool) -> act::core::types::ToolDefinition {
 /// Send an HTTP request via wasi-fetch and stream the response back.
 async fn send_api_request(
     prepared: request::PreparedRequest,
-    writer: &mut wit_bindgen::StreamWriter<act::core::types::StreamEvent>,
+    writer: &mut wit_bindgen::StreamWriter<act::core::types::ToolEvent>,
 ) {
     let mut builder = wasi_fetch::Client::new()
         .request(prepared.method, &prepared.url)
@@ -181,7 +181,7 @@ async fn send_api_request(
         Ok(r) => r,
         Err(e) => {
             let _ = writer
-                .write_all(vec![act::core::types::StreamEvent::Error(make_error(
+                .write_all(vec![act::core::types::ToolEvent::Error(make_error(
                     act_types::constants::ERR_INTERNAL,
                     format!("HTTP error: {e}"),
                 ))])
@@ -200,7 +200,7 @@ async fn send_api_request(
     if status >= 400 {
         let body = response.into_body().text().await.unwrap_or_default();
         let _ = writer
-            .write_all(vec![act::core::types::StreamEvent::Error(make_error(
+            .write_all(vec![act::core::types::ToolEvent::Error(make_error(
                 act_types::constants::ERR_INTERNAL,
                 format!("HTTP {status}: {body}"),
             ))])
@@ -211,7 +211,7 @@ async fn send_api_request(
     let mut body = response.into_body();
     while let Some(chunk) = body.chunk().await {
         let _ = writer
-            .write_all(vec![act::core::types::StreamEvent::Content(
+            .write_all(vec![act::core::types::ToolEvent::Content(
                 act::core::types::ContentPart {
                     data: chunk.to_vec(),
                     mime_type: content_type.clone(),
@@ -245,17 +245,15 @@ impl exports::act::core::tool_provider::Guest for OpenApiBridge {
         })
     }
 
-    async fn call_tool(
-        call: act::core::types::ToolCall,
-    ) -> wit_bindgen::rt::async_support::StreamReader<act::core::types::StreamEvent> {
-        let (mut writer, reader) = wit_stream::new::<act::core::types::StreamEvent>();
+    async fn call_tool(call: act::core::types::ToolCall) -> act::core::types::ToolResult {
+        let (mut writer, reader) = wit_stream::new::<act::core::types::ToolEvent>();
 
         wit_bindgen::spawn(async move {
             let config = match parse_config_from_metadata(&call.metadata) {
                 Ok(c) => c,
                 Err(e) => {
                     let _ = writer
-                        .write_all(vec![act::core::types::StreamEvent::Error(e)])
+                        .write_all(vec![act::core::types::ToolEvent::Error(e)])
                         .await;
                     return;
                 }
@@ -271,7 +269,7 @@ impl exports::act::core::tool_provider::Guest for OpenApiBridge {
                             Some(t) => t,
                             None => {
                                 let _ = writer
-                                    .write_all(vec![act::core::types::StreamEvent::Error(
+                                    .write_all(vec![act::core::types::ToolEvent::Error(
                                         make_error(
                                             act_types::constants::ERR_NOT_FOUND,
                                             format!("Tool '{}' not found in spec", call.name),
@@ -283,7 +281,7 @@ impl exports::act::core::tool_provider::Guest for OpenApiBridge {
                         },
                         Err(e) => {
                             let _ = writer
-                                .write_all(vec![act::core::types::StreamEvent::Error(make_error(
+                                .write_all(vec![act::core::types::ToolEvent::Error(make_error(
                                     act_types::constants::ERR_INTERNAL,
                                     e,
                                 ))])
@@ -299,7 +297,7 @@ impl exports::act::core::tool_provider::Guest for OpenApiBridge {
                 Ok(v) => v,
                 Err(e) => {
                     let _ = writer
-                        .write_all(vec![act::core::types::StreamEvent::Error(make_error(
+                        .write_all(vec![act::core::types::ToolEvent::Error(make_error(
                             act_types::constants::ERR_INVALID_ARGS,
                             format!("Invalid arguments: {e}"),
                         ))])
@@ -326,7 +324,7 @@ impl exports::act::core::tool_provider::Guest for OpenApiBridge {
                 Ok(r) => r,
                 Err(e) => {
                     let _ = writer
-                        .write_all(vec![act::core::types::StreamEvent::Error(make_error(
+                        .write_all(vec![act::core::types::ToolEvent::Error(make_error(
                             act_types::constants::ERR_INVALID_ARGS,
                             e,
                         ))])
@@ -339,6 +337,6 @@ impl exports::act::core::tool_provider::Guest for OpenApiBridge {
             send_api_request(prepared, &mut writer).await;
         });
 
-        reader
+        act::core::types::ToolResult::Streaming(reader)
     }
 }
