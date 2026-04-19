@@ -37,6 +37,8 @@ pub struct ToolFlags {
     pub destructive: bool,
 }
 
+use convert_case::{Case, Casing};
+
 /// Generate a tool name from HTTP method and path when operationId is absent.
 /// e.g. GET /users/{id}/posts -> get_users_by_id_posts
 pub fn generate_tool_name(method: &str, path: &str) -> String {
@@ -45,9 +47,9 @@ pub fn generate_tool_name(method: &str, path: &str) -> String {
         .filter(|s| !s.is_empty())
         .map(|seg| {
             if seg.starts_with('{') && seg.ends_with('}') {
-                format!("by_{}", &seg[1..seg.len() - 1])
+                format!("by_{}", (&seg[1..seg.len() - 1]).to_case(Case::Snake))
             } else {
-                seg.replace('-', "_")
+                seg.to_case(Case::Snake)
             }
         })
         .collect();
@@ -137,7 +139,8 @@ pub fn extract_tools(spec: &OpenApiSpec) -> Vec<ResolvedTool> {
         for (method, operation) in path_item.operations() {
             let name = operation
                 .operation_id
-                .clone()
+                .as_deref()
+                .map(|id| id.to_case(Case::Snake))
                 .unwrap_or_else(|| generate_tool_name(method, path));
 
             let description = operation
@@ -239,7 +242,7 @@ mod tests {
     fn generate_name_with_hyphens() {
         assert_eq!(
             generate_tool_name("get", "/user-groups/{groupId}"),
-            "get_user_groups_by_groupId"
+            "get_user_groups_by_group_id"
         );
     }
 
@@ -275,7 +278,7 @@ mod tests {
         .unwrap();
         let tools = extract_tools(&spec);
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name, "listUsers");
+        assert_eq!(tools[0].name, "list_users");
         assert_eq!(tools[0].description, "List users");
         assert!(tools[0].metadata_flags.read_only);
     }

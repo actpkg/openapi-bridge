@@ -1,7 +1,7 @@
 [package]
 name = "openapi-bridge"
 description = "Dynamically exposes OpenAPI endpoints as ACT tools"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 
 [package.metadata.act-component.std.capabilities."wasi:http"]
@@ -16,6 +16,7 @@ url = "2"
 http = "1"
 wasi-fetch = "0.1.3"
 wit-bindgen = { version = "0.57", features = ["async-spawn"] }
+convert_case = "0.11"
 
 [profile.release]
 lto = "fat"
