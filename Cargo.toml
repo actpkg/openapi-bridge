@@ -1,21 +1,27 @@
 [package]
 name = "openapi-bridge"
 description = "Dynamically exposes OpenAPI endpoints as ACT tools"
-version = "0.2.4"
+version = "0.3.0"
 edition = "2024"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yml = "0.0.12"
+serde_yml = "0.0.13"
 schemars = "1"
-act-types = "0.12"
+act-sdk = "0.14"
+act-types = "0.14"
 ciborium = "0.2"
 url = "2"
 http = "1"
-wasi-fetch = "0.2.0"
-wit-bindgen = { version = "0.60", features = ["async-spawn"] }
-convert_case = "0.11"
+# `default-features = false` drops cookies/cache/decompression this bridge
+# does not use; `idn` stays on so spec URLs and API hosts on non-ASCII
+# hostnames resolve.
+hclient = { version = "0.1.0-alpha.18", default-features = false, features = ["idn"] }
+hclient-wasi = "0.1.5"
+bytes = "1"
+wit-bindgen = { version = "0.62", features = ["async-spawn"] }
+convert_case = "0.12"
 
 [profile.release]
 lto = "fat"

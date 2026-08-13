@@ -2,6 +2,16 @@
 name = "openapi-bridge"
 
 [std.capabilities."wasi:http"]
+description = """
+Fetches the OpenAPI document a session names and calls the operations it \
+declares. The upstream is chosen per session, so the ceiling is open by \
+nature — bound it with a grant when the deployment knows which API it is \
+fronting."""
 
 [[std.capabilities."wasi:http".allow]]
 host = "*"
+
+# Bare table, as the credentials spec prescribes — the class carries no
+# constraints. An undeclared class is denied outright and no grant can widen
+# it (ACT-AUTH.md §1.1.2).
+[std.capabilities."act:credentials"]

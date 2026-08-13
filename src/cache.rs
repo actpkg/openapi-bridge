@@ -29,6 +29,22 @@ pub fn get_cached_tool(url: &str, tool_name: &str) -> Option<ResolvedTool> {
         .and_then(|c| c.tools.iter().find(|t| t.name == tool_name).cloned())
 }
 
+/// Choose the security scheme for a cached document.
+///
+/// `None` when the document is not cached at all; `Some(Err(_))` when it is
+/// cached and the caller's `pin` names nothing it can present. Run against the
+/// cache rather than against a spec the caller holds, so that one parse serves
+/// every session opened against the same `spec_url`.
+pub fn select_scheme(
+    url: &str,
+    pin: Option<&str>,
+) -> Option<Result<crate::security::Selection, String>> {
+    let lock = cache().lock().unwrap();
+    lock.get(url).map(|c| {
+        crate::security::select(&c.spec.components.security_schemes, &c.spec.security, pin)
+    })
+}
+
 /// Get the base URL from a cached spec.
 pub fn get_base_url(url: &str) -> Option<String> {
     let lock = cache().lock().unwrap();
