@@ -16,6 +16,18 @@ build:
     cargo build --release
     {{actbuild}} pack {{wasm}}
 
+# Re-embed act:component metadata and act:skill without rebuilding. `pack` is
+# idempotent, so running it after `build` is harmless.
+pack:
+    {{actbuild}} pack {{wasm}}
+
+# Host-target unit tests. The crate is a cdylib for wasm32-wasip2, so the
+# target has to be named: the pure logic (security-scheme selection, credential
+# presentation, the open-args guard) is what these drive, and none of it can
+# run under `cargo test` on the default wasm target.
+test-unit:
+    cargo test --target x86_64-unknown-linux-gnu
+
 test: build
     ACT="{{act}}" uv run --project e2e pytest e2e/ -v
 

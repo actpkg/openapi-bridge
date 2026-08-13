@@ -125,10 +125,19 @@ async def client(act_command: list[str], wasm_path: Path):
     needs the full `wasi:http` ceiling act.toml declares (`host = "*"`) —
     `--allow wasi:http` opens exactly that, carried verbatim from the old
     justfile's grant.
+
+    `act:credentials` is granted too, because the component now imports the
+    store: a headless run defaults `ask` to deny, and a denied class and an
+    empty store are indistinguishable to the guest by design (ACT-AUTH
+    §1.1.7) — so without this the suite would exercise the "denied" branch
+    while believing it exercised the "no credential stored" one. No secret
+    is provisioned here: the petstore operations these tests drive need
+    none, and the point is that the bridge reaches them unauthenticated.
     """
     transport = StdioTransport(
         command=act_command[0],
-        args=[*act_command[1:], "run", str(wasm_path), "--mcp", "--allow", "wasi:http"],
+        args=[*act_command[1:], "run", str(wasm_path), "--mcp",
+              "--allow", "wasi:http", "--allow", "act:credentials"],
         keep_alive=False,  # stateful component: fresh process per test is not optional here
         log_file=LOG_FILE,
     )
