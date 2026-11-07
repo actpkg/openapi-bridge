@@ -1,4 +1,4 @@
-wasm := "target/wasm32-wasip2/release/openapi_bridge.wasm"
+wasm := "target/wasm32-wasip3/release/openapi_bridge.wasm"
 
 act := env("ACT", "npx @actcore/act")
 actbuild := env("ACT_BUILD", "npx @actcore/act-build")
@@ -21,7 +21,7 @@ build:
 pack:
     {{actbuild}} pack {{wasm}}
 
-# Host-target unit tests. The crate is a cdylib for wasm32-wasip2, so the
+# Host-target unit tests. The crate is a cdylib for wasm32-wasip3, so the
 # target has to be named: the pure logic (security-scheme selection, credential
 # presentation, the open-args guard) is what these drive, and none of it can
 # run under `cargo test` on the default wasm target.

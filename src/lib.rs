@@ -38,8 +38,9 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 
 use exports::act::sessions::session_provider as session_exports;
 use exports::act::tools::tool_provider as tool_exports;
@@ -75,37 +76,52 @@ struct UpstreamSession {
     credential: Credential,
 }
 
-thread_local! {
-    static SESSIONS: RefCell<HashMap<String, UpstreamSession>> = RefCell::new(HashMap::new());
-    static NEXT_ID: Cell<u64> = const { Cell::new(0) };
-}
+/// A plain `static`, not `thread_local!`: under wasip3 every host fiber gets
+/// its own TLS, so a `thread_local` session table would be repopulated from
+/// scratch on every tool call. The `Mutex` makes the table `Sync` for the
+/// `static`; a fiber can only switch at an await point, so these never-await
+/// critical sections never contend. See the `act_sdk::sessions` module docs.
+static SESSIONS: LazyLock<Mutex<HashMap<String, UpstreamSession>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static NEXT_ID: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
 
 fn alloc_session_id() -> String {
-    NEXT_ID.with(|n| {
-        let id = n.get();
-        n.set(id + 1);
-        format!("openapi_{id}")
-    })
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed) + 1;
+    format!("openapi_{id}")
 }
 
 fn snapshot_session(session_id: &str) -> Option<BridgeConfig> {
-    SESSIONS.with(|s| s.borrow().get(session_id).map(|u| u.config.clone()))
+    SESSIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(session_id)
+        .map(|u| u.config.clone())
 }
 
 fn snapshot_selection(session_id: &str) -> Option<Selection> {
-    SESSIONS.with(|s| s.borrow().get(session_id).map(|u| u.selection.clone()))
+    SESSIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(session_id)
+        .map(|u| u.selection.clone())
 }
 
 fn cached_credential(session_id: &str) -> Option<Credential> {
-    SESSIONS.with(|s| s.borrow().get(session_id).map(|u| u.credential.clone()))
+    SESSIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(session_id)
+        .map(|u| u.credential.clone())
 }
 
 fn remember_credential(session_id: &str, credential: Credential) {
-    SESSIONS.with(|s| {
-        if let Some(session) = s.borrow_mut().get_mut(session_id) {
-            session.credential = credential;
-        }
-    });
+    if let Some(session) = SESSIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_mut(session_id)
+    {
+        session.credential = credential;
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -794,16 +810,14 @@ impl session_exports::Guest for OpenApiBridge {
         spec::validate_scheme(&config.headers, &selection.scheme).map_err(open_invalid_args)?;
 
         let id = alloc_session_id();
-        SESSIONS.with(|s| {
-            s.borrow_mut().insert(
-                id.clone(),
-                UpstreamSession {
-                    config,
-                    selection,
-                    credential: Credential::Unfetched,
-                },
-            );
-        });
+        SESSIONS.lock().unwrap_or_else(|e| e.into_inner()).insert(
+            id.clone(),
+            UpstreamSession {
+                config,
+                selection,
+                credential: Credential::Unfetched,
+            },
+        );
 
         Ok(session_exports::Session {
             id,
@@ -812,8 +826,9 @@ impl session_exports::Guest for OpenApiBridge {
     }
 
     fn close_session(session_id: String) {
-        SESSIONS.with(|s| {
-            s.borrow_mut().remove(&session_id);
-        });
+        SESSIONS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&session_id);
     }
 }
