@@ -29,7 +29,7 @@ test-unit:
     cargo test --target x86_64-unknown-linux-gnu
 
 test: build
-    ACT="{{act}}" uv run --project e2e pytest e2e/ -v
+    cd e2e && ACT="{{act}}" WASM="../{{wasm}}" cargo test
 
 publish:
     #!/usr/bin/env bash
